@@ -1,0 +1,8 @@
+.DS_Store
+.env
+__pycache__/
+*.pyc
+data/chroma/
+data/processed/embedding_preview.json
+data/processed/embedding_preview.jsonl
+workflow_rag.egg-info/
