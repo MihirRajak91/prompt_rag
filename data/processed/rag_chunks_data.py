@@ -3,7 +3,12 @@ PROMPT_ACTION_EVENTS_BUILTIN_FILTERING = {
     "doc_type": "RULE",
     "topic": "actions_builtin_filtering",
     "priority": 90,
-    "data": "Rules for direct record actions (create, update, delete, duplicate, restore) where the event itself handles record selection and filtering. Use EVNT_RCRD_ADD / UPDT / DEL / DUP / REST directly for action-oriented queries like create, update, delete, duplicate, or restore records, without EVNT_RCRD_INFO or external filters. Only CREATE with complex conditions may use conditions (CNDN_BIN / SEQ / DOM). Enforces strict action detection (e.g., queries starting with create are always CREATE).",
+    "data":  """
+ROUTER.RULE.actions_builtin_filtering
+Intent: database record CRUD action (create/update/delete/duplicate/restore) on a window/entity record.
+Output: choose EVNT_RCRD_ADD / EVNT_RCRD_UPDT / EVNT_RCRD_DEL / EVNT_RCRD_DUP / EVNT_RCRD_REST (direct action; record selection handled inside event).
+Scope: record operations only.
+""",
 
     "text": """CRITICAL: Action Events with Built-in Filtering
 
@@ -63,7 +68,11 @@ PROMPT_COND_OVERVIEW_AND_PATTERNS = {
     "doc_type": "RULE",
     "topic": "conditions",
     "priority": 100,
-    "data": "Use this when a user query contains conditional branching patterns like “if…then…else”, “when … then”, “and check if / and verify if” (parallel checks), or “if not then / else check if / first check…if not” (cascading fallbacks). Select the correct condition type: CNDN_BIN (single true/false branch—always show both branches), CNDN_SEQ (multiple independent conditions with separate actions), CNDN_DOM (cascading checks where next runs only if previous fails). Also includes rules to avoid adding conditions when filters/actions already handle criteria (e.g., JMES/Filter and built-in record action filtering like delete/duplicate/restore).",
+    "data": """ROUTER.RULE.conditions
+Intent: conditional branching / decision logic in workflow.
+Signals: if/else, when/then, otherwise, unless, first check, if not, else check.
+Output: choose CNDN_BIN / CNDN_SEQ / CNDN_DOM (explicit TRUE + FALSE paths).
+""",
 
     "text": """⚠️⚠️⚠️ CRITICAL: CONDITION TYPE DETECTION ⚠️⚠️⚠️
 
@@ -242,8 +251,10 @@ PROMPT_LOOPS_TYPES = {
     "doc_type": "RULE",
     "topic": "loops",
     "priority": 70,
-    "data": """Loop Events & Repetition Routing (FOR / WHILE / DO-WHILE + Condition Nesting Rules)
-Use this when a user query includes repetition or iteration, such as “N times”, “repeat”, “for each / for every record”, “loop through”, numeric ranges (1 to 10), or nested loops. Determines correct loop type (EVNT_LOOP_FOR for collections/counts, EVNT_LOOP_WHILE for pre-checked conditions, EVNT_LOOP_DOWHILE for at-least-once execution), plus loop control (BREAK / CONTINUE). Also defines when loops must be standalone vs nested inside a binary condition (condition + repetition ⇒ loop inside CNDN_BIN IF TRUE), and enforces strict formatting rules: no numbering inside conditions or loops, use ↳ INSIDE LOOP, always show IF TRUE / IF FALSE, and place event codes on the same line as branch indicators.
+    "data": """ROUTER.RULE.loops
+Intent: repetition / iteration in workflow.
+Signals: repeat, times, for each, for every, loop, iterate, from X to Y, while, until, do while, break, continue.
+Output: choose EVNT_LOOP_FOR / EVNT_LOOP_WHILE / EVNT_LOOP_DOWHILE (+ EVNT_LOOP_BREAK / EVNT_LOOP_CONTINUE if requested).
 """,
 
     "text": """
@@ -539,12 +550,15 @@ LOOP TYPE IDENTIFICATION:
 
 
 
-PROMPT_ACTION_EVENTS_BUILTIN_FILTERING = {
+PROMPT_DATA_OPS_RULES = {
 
     "doc_type": "RULE",
     "topic": "data_ops_rules",
     "priority": 80,
-    "data": "Use this when a user query involves calculations or data transformations, such as add/subtract/multiply/divide, percentages, string manipulation (uppercase, lowercase, concatenate, split, regex, replace), date operations (today, add days, format date, timezone conversion), random/UUID generation, or derived field values before create/update. Covers value-level “if…then…else” logic for assignments (not branching) and data cleaning/formatting. Explicitly prevents misuse of CNDN_BIN for computed fields—use conditions only when the entire workflow branches, not when computing a value.",
+    "data": """ROUTER.RULE.data_ops_rules
+Intent: compute/transform/derive a value or reshape data.
+Signals: calculate, compute, sum, total, percentage, concat, uppercase/lowercase, split, replace, regex, format date, add days, round, uuid, random.
+Output: use EVNT_DATA_OPR.""",
 
     "text": """TEP X: Formula / Calculation Detection (EVNT_DATA_OPR)
 Use EVNT_DATA_OPR when the user wants to:
@@ -621,182 +635,15 @@ TRIGGER METHODS
 """
 }
 
-CATALOG_NOTIFICATIONS = {
-
-    "doc_type": "CATALOG",
-    "topic": "events_catalog.notifications",
-    "priority": 40,
-    "data": """
-Use this when a user query requires selecting notification-related workflow events (email, SMS, system, push, alert, webhook). Maps user intent directly to the appropriate EVNT_* code.
-""",
-
-    "text": """
-EVENTS LIST WITH DESCRIPTIONS
-"EVNT_NOTI_MAIL": "Email Notification - Email Events in the Workflow Builder module allow automated sending of emails based on workflow triggers. Users can configure emails with static values or dynamic content, including recipients, subject, body, and attachments. These events ensure timely and consistent communication by automatically sending emails when specific conditions or schedules are met.",
-"EVNT_NOTI_SMS": "SMS Notification - SMS Notifications enable automated text messaging through services like Twilio based on workflow triggers. Users can configure provider credentials, specify recipients and message content, and validate settings to ensure proper delivery. These notifications streamline timely communication by automatically sending SMS messages when workflow conditions are met.",
-"EVNT_NOTI_NOTI": "System Notification - Notification Events allow automated alerts to be sent to recipients based on specific workflow triggers. Users can configure the title, recipients, subject, and message content, ensuring that important updates reach the right stakeholders. This feature helps keep teams informed and ensures timely communication when predefined conditions are met.",
-"EVNT_NOTI_PUSH": "Push Notification - Push Notification Events allow automated alerts to be sent to mobile devices based on specific workflow triggers. Users can configure the title, recipients, subject, and message content to ensure timely updates. This feature keeps stakeholders informed in real-time and ensures important notifications are delivered promptly when predefined conditions are met.",
-"EVNT_UX_ALRT": "Alert Message - The Alert Message Event allows users to configure and display notifications within the system. Users can set the position on the screen, choose the alert type (default, success, error), specify an autoclose delay, and provide the message content. When triggered, the alert appears according to the configured settings, providing timely feedback or notifications to users.",
-"EVNT_NOTI_WBH": "Webhook - This event sends real-time notifications to external systems via a configured webhook URL. Users can set the URL, authentication credentials, payload, and notification settings.",
-
-"""
-}
-
-CATALOG_RECORDS_DYNAMIC = {
-
-    "doc_type": "CATALOG",
-    "topic": "events_catalog.records_dynamic",
-    "priority": 40,
-    "data": """
-Use this when a user query requires selecting dynamic record operations (create, retrieve, update, delete, restore, duplicate). Maps user intent directly to the appropriate EVNT_RCRD_* code.
-""",
-
-    "text": """
-EVENTS LIST WITH DESCRIPTIONS
-"EVNT_RCRD_ADD": "Create A Dynamic Record - Automates creation of application-specific records within customizable windows (e.g., hotel bookings, patient records, inventory items). Supports field configuration using static data, workflow variables, previous node outputs, or user input. Enables bulk creation for scalable industry-specific data management.",
-"EVNT_RCRD_INFO": "Retrieve a Dynamic Record - Fetches specific application records from configurable system windows for processing, validation, or reference. Uses constants, workflow data, or filters to retrieve industry-specific data like military equipment, hotel reservations, or library transactions.",
-"EVNT_RCRD_UPDT": "Update A Dynamic Record - Modifies existing application records by selecting from dynamic system windows. Fields can be auto-filled with previous data and updated using static values, workflow variables, or user input for real-time application data maintenance across different domains.",
-"EVNT_RCRD_DEL": "Delete A Dynamic Record - Enables automated removal of application-specific records from dynamic windows based on predefined conditions. Uses constants, workflow data, or filters for precise deletion of industry-specific records like hospital appointments or military personnel data.",
-"EVNT_RCRD_REST": "Restore A Dynamic Record - Recovers previously deleted application records from dynamic system windows based on predefined conditions. Enables automatic restoration of domain-specific data across various business systems.",
-"EVNT_RCRD_DUP": "Duplicate A Dynamic Record - Creates exact copies of application records from dynamic system windows based on predefined conditions. Enables automatic duplication of industry-specific records with configurable field values for hotel room types, medical procedures, or library resources.",
-
-"""
-}
-
-CATALOG_RECORDS_STATIC = {
-
-    "doc_type": "CATALOG",
-    "topic": "events_catalog.records_static",
-    "priority": 40,
-    "data": """
-Use this when a user query requires selecting static record operations (create, retrieve, update, delete, restore, duplicate). Maps user intent directly to the appropriate EVNT_RCRD_*_STC code.
-""",
-
-    "text": """
-EVENTS LIST WITH DESCRIPTIONS
-"EVNT_RCRD_ADD_STC": "Create A Static Record - Automates creation of system-level static records for user management, role assignments, department setup, and other standardized system configurations. Supports consistent field mapping across all applications and domains.",
-"EVNT_RCRD_INFO_STC": "Retrieve a Static Record - Fetches system-level static records from predefined tables for user authentication, role verification, department lookup, and other standardized system references that remain consistent regardless of application domain.",
-"EVNT_RCRD_UPDT_STC": "Update A Static Record - Modifies existing system-level static records for user profile updates, role changes, department modifications, and other standardized system maintenance tasks that apply universally across all systems.",
-"EVNT_RCRD_DEL_STC": "Delete A Static Record - Enables removal of system-level static records from predefined tables for user deactivation, role removal, or department cleanup following standardized system protocols applicable to all business domains.",
-"EVNT_RCRD_REST_STC": "Restore A Static Record - Recovers previously deleted system-level static records from predefined tables for user reactivation, role restoration, or department recovery using consistent system-wide standards.",
-"EVNT_RCRD_DUP_STC": "Duplicate A Static Record - Creates exact copies of system-level static records from predefined tables for role duplication, department cloning, or other standardized system configurations.",
-
-"""
-}
-
-CATALOG_DATA_OPS = {
-
-    "doc_type": "CATALOG",
-    "topic": "events_catalog.data_ops",
-    "priority": 40,
-    "data": """
-Use this when a user query requires selecting data operations, extraction, filters, logging, or validation events. Maps user intent directly to the appropriate EVNT_* code.
-""",
-
-    "text": """
-EVENTS LIST WITH DESCRIPTIONS
-"EVNT_DATA_OPR": "Calculation - The Formula Event allows users to perform dynamic computations and data transformations within workflows using predefined formulas. Users can define formula rows with static values, workflow variables, or outputs from previous events. Available formula categories include String, Arithmetic, Statistics, DateTime, Array, Dictionary, Regex, Math, Digital Logic, and Utility functions.",
-"EVNT_FLTR": "Filter Records - The Filter Event allows users to retrieve multiple records from dynamic windows based on specific conditions. Users can define filtering criteria using field comparisons, logical operators, or workflow data to automatically select matching records. This event streamlines data retrieval.",
-"EVNT_JMES": "JMES Data Extraction - The JMESPath Data Extraction Event enables users to transform and extract specific elements from JSON data using JMESPath queries. Input JSON can come from static sources or previous workflow steps, and queries allow filtering, restructuring, and generating new JSON outputs.",
-"EVNT_JSON_CNTRCT": "JSON Contract Validation - The JSON Contract Validation Event enables users to validate JSON data against a predefined schema or contract. Acting as a quality gate in workflows, it ensures that data meets the required structure and constraints before proceeding.",
-"EVNT_LGR": "Workflow Logger - The Workflow Logger Event records key workflow activities, errors, and events for monitoring, debugging, and auditing. It supports configurable logging levels (Info, Error, Access, Security, Performance), structured JSON log formats, and conditional logging.",
-
-"""
-}
-
-CATALOG_EXTERNAL_INTEGRATIONS = {
-
-    "doc_type": "CATALOG",
-    "topic": "events_catalog.external_integrations",
-    "priority": 40,
-    "data": """
-Use this when a user query requires selecting external integration events (API, database, ChatGPT, webhook). Maps user intent directly to the appropriate EVNT_* code.
-""",
-
-    "text": """
-EVENTS LIST WITH DESCRIPTIONS
-"EVNT_EXT_API": "External API Event - This event automates interactions with external APIs by configuring HTTP requests, including method, URL, headers, and query parameters.",
-"EVNT_EXT_DB": "External Database Integration - This event allows workflows to connect to external databases (PostgreSQL, MySQL, Oracle), execute SQL queries, and retrieve results in JSON format.",
-"EVNT_CHATGPT": "AI-Powered Event - This event integrates OpenAI's ChatGPT into workflows to automate conversational tasks, text processing, and intelligent responses. Users configure a prompt and authenticate with an OpenAI API token.",
-"EVNT_NOTI_WBH": "Webhook - This event sends real-time notifications to external systems via a configured webhook URL. Users can set the URL, authentication credentials, payload, and notification settings.",
-
-"""
-}
-
-CATALOG_MISC = {
-
-    "doc_type": "CATALOG",
-    "topic": "events_catalog.misc",
-    "priority": 40,
-    "data": """
-Use this when a user query requires selecting user management, approvals, variables, UI actions, invoices, reports, or other system events. Maps user intent directly to the appropriate EVNT_* code.
-""",
-
-    "text": """
-EVENTS LIST WITH DESCRIPTIONS
-"EVNT_USER_MGMT_ADD": "Create a User - The Create User Event automates the creation of new users in the system by defining user details such as name, email, country, department, role, password, and creator. It supports specifying a logged-in or a static user as the creator.",
-"EVNT_USER_MGMT_UPDT": "Update a User - The Update User Event automates modifying existing user details in the system, such as name, email, country, department, and role. It allows selecting a specific user, configuring update parameters, and triggering the event to apply changes.",
-"EVNT_USER_MGMT_DEACT": "Deactivate / Activate a User - This event automates changing user statuses to 'Active' or 'Inactive.' Users can configure it for specific users via dropdown selection or for multiple users based on conditions (e.g., department).",
-"EVNT_USER_MGMT_ASSIGN": "Assign a Role - This event automates assigning roles to users. Roles can be assigned to specific users via dropdown selection or through a designated user performing the assignment.",
-"EVNT_USER_MGMT_EXTND": "Extend User to Another System - This event automates granting a user access to additional systems. Administrators select the user, choose the target system(s), and assign roles.",
-"EVNT_ROLE_PRMSSN": "Assign or Remove Permissions - Event for managing role permissions within the system.",
-"EVNT_PBL_RGSTN": "Public Registration - This event enables administrators to create a public registration link and send it via email. Configurations include link expiry, usage limits, department and role assignment, and customizable email content.",
-"EVNT_INVC_ADD": "Generate Invoice - Event for creating invoices within the system.",
-"EVNT_INVC_UPDT": "Update Invoice - Event for modifying existing invoices.",
-"EVNT_INVC_SEND": "Send Invoice - Event for sending invoices to recipients.",
-"EVNT_RPRT_PDF": "Report in PDF - This event enables automated report generation based on selected menus, windows, and templates. Users can configure input types and specify who updates the report.",
-"EVNT_SPRT_TKT": "Support Ticket - Event for managing support ticket operations.",
-"EVNT_RCRD_DUMP": "Generate Data Link - Event for creating data export links.",
-"EVNT_VAR_ADD": "Create a variable - This event allows users to define and store variables for use in workflows. Users can specify the variable name, type, and input source.",
-"EVNT_VAR_INFO": "Retrieve a variable - This event enables users to fetch previously stored variables for use in workflows. Users select the record ID to retrieve.",
-"EVNT_VAR_UPDT": "Update a variable - This event allows users to modify previously stored variables for use in workflows. Users select the record ID to update.",
-"EVNT_VAR_DEL": "Delete a variable - This event allows users to permanently remove stored variables. Users select the record ID to delete.",
-"EVNT_UX_RDRCT": "Redirect (URL) - The Redirect URL Event allows users to automate redirection to specific URLs, supporting both local and external destinations.",
-"EVNT_ACT_DYN_REQ": "Request an Approval - This event allows users to configure approval requests for specific records or processes. Users define the title, description, menu, window, and record setup.",
-"EVNT_ACT_DYN_MOD": "Modify a Request - This event allows users to modify existing approval requests by configuring the title, description, menu, window, record field, default values, and the assigned user.",
-"EVNT_ACT_VIEW": "View Data - Event for viewing specific data records.",
-"EVNT_ACT_BULK_VIEW": "View Bulk Data - Event for viewing multiple data records.",
-"EVNT_ACT_SHR": "Share - Event for sharing data or records.",
-"EVNT_ACT_QR": "QR Code Generation - Event for generating QR codes.",
-"EVNT_ACT_DWLND": "Download - Event for downloading data or files.",
-"EVNT_ACT_CPY_RW": "Copy Row - Event for copying table rows.",
-"EVNT_ACT_CPYDATA": "Copy Data - Event for copying data between fields or records.",
-"EVNT_ACT_DISC_FM": "Discussion Forum - Event for forum discussions.",
-"EVNT_ACT_MNG_SCH": "Manage Schedule - Event for schedule management.",
-"EVNT_ACT_VRFY": "Verify - Event for verification operations.",
-"EVNT_ACT_CMMNT": "Comment - Event for adding comments.",
-
-"""
-}
-
-CATALOG_LOOPS = {
-
-    "doc_type": "CATALOG",
-    "topic": "events_catalog.loops",
-    "priority": 40,
-    "data": """
-Use this when a user query requires selecting loop constructs (FOR, WHILE, DO-WHILE, BREAK, CONTINUE). Maps user intent directly to the appropriate EVNT_LOOP_* code.
-""",
-
-    "text": """
-EVENTS LIST WITH DESCRIPTIONS
-"EVNT_LOOP_FOR": "For Loop - Iterates over a range of numbers or items in an array. It runs a defined workflow for each item or value in the sequence. Ideal for automating repetitive batch tasks like processing lists or sending bulk notifications.",
-"EVNT_LOOP_WHILE": "While Loop - Repeats a workflow as long as a condition is true, checked before each iteration. Ideal for dynamic scenarios where the number of iterations is unknown and depends on changing data.",
-"EVNT_LOOP_DOWHILE": "Do While Loop - Executes its workflow at least once. The condition to continue is checked after each iteration. Ideal for ensuring an action runs before checking if it needs to repeat.",
-"EVNT_LOOP_BREAK": "Break Loop - This block is used to immediately exit a loop when a specified condition becomes true. It halts all further iterations, moving the workflow directly to the next step. This prevents unnecessary operations and optimizes efficiency.",
-"EVNT_LOOP_CONTINUE": "Continue Loop - Skips the current loop iteration when a condition is met. Proceeds directly to the next cycle, bypassing any remaining steps. This prevents redundant actions and improves loop efficiency."
-
-"""
-}
-
 PROMPT_PLANNER_POLICY = {
 
     "doc_type": "RULE",
     "topic": "planner_policy",
     "priority": 80,
     "data": """
-Conditional Branching & Logic Selection (CNDN_BIN / CNDN_SEQ / CNDN_DOM)
-Use this only when a user query requires explicit logical branching beyond event-inherent filtering, such as “if…then…else”, boolean logic (AND / OR / NOT), range checks, or multi-step decision logic. Select CNDN_BIN for single true/false branches, CNDN_SEQ (with CNDN_LGC) for multiple independent condition checks, and CNDN_DOM for cascading fallback logic (“first check…, if not then…”). Do not include conditions for simple filters or CRUD actions already handled by events; omit the Conditions section entirely when no separate branching logic is required.
+ROUTER.RULE.planner_policy
+Intent: output format + plan writing constraints (Markdown sections, omit unused sections, flow numbering, branch formatting).
+Output: formatting policy only (not event selection).
 """,
 
     "text": """
@@ -879,16 +726,28 @@ OUTPUT: Markdown Structured Workflow Plan ONLY.
 """
 }
 
+PROMPT_NOTIFICATIONS_INTENT = {
+    "doc_type": "RULE",
+    "topic": "notifications_intent",
+    "priority": 95,
+    "data": """
+ROUTER.RULE.notifications_intent
+Intent: send a message/notification to a recipient.
+Signals: email, mail, notify, notification, alert, sms, text message, push, webhook.
+Output: select EVNT_NOTI_* event family (exact mapping handled by agent/backstory).
+""",
+    "text": """Use when the user request is primarily about sending a notification/message.
+Do not use for record CRUD, loops, or computations."""
+}
+
+
+
 chunk_data = [
     PROMPT_ACTION_EVENTS_BUILTIN_FILTERING,
+    PROMPT_NOTIFICATIONS_INTENT,
+    PROMPT_DATA_OPS_RULES,
     PROMPT_COND_OVERVIEW_AND_PATTERNS,
     PROMPT_LOOPS_TYPES,
-    CATALOG_NOTIFICATIONS,
-    CATALOG_RECORDS_DYNAMIC,
-    CATALOG_RECORDS_STATIC,
-    CATALOG_DATA_OPS,
-    CATALOG_EXTERNAL_INTEGRATIONS,
-    CATALOG_MISC,
-    CATALOG_LOOPS,
     PROMPT_PLANNER_POLICY,
 ]
+

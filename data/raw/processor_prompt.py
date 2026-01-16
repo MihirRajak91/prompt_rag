@@ -1096,3 +1096,4 @@ PROMPT_SECTIONS_REGISTRY = {
     "output_contract": PROMPT_OUTPUT_CONTRACT,
     "examples": PROMPT_EXAMPLES,
 }
+#if status is approved send email else send notification
