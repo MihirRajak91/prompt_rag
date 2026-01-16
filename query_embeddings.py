@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import statistics
+from functools import cmp_to_key
 from pathlib import Path
 
 import chromadb
@@ -12,10 +13,16 @@ from dotenv import load_dotenv
 from constants import DEFAULT_COLLECTION, DEFAULT_MODEL
 from create_embeddings import embed_texts
 
-
 # Chroma returns "distances" by default. For cosine distance, lower is better.
 DISTANCE_SORT = "asc"
 MIN_GROUP_SIZE = 2
+TOP_ROUTER = 3
+PRIORITY_EPSILON = 0.03
+
+# NEW: Router topic acceptance window.
+# Keep TOP_ROUTER candidates, but only accept topics whose distance is within this ratio of the best router distance.
+# If best router dist = d0, accept items with dist <= d0 * ROUTER_CUTOFF_RATIO
+ROUTER_CUTOFF_RATIO = 1.06
 
 
 def build_items(results: dict) -> list[dict]:
@@ -49,17 +56,33 @@ def select_by_groups(items: list[dict], top_k: int) -> list[dict]:
         group_key = (doc_type, topic)
         grouped.setdefault(group_key, []).append(item)
 
-    def sort_key(item: dict) -> tuple[float, int]:
-        return (item["distance"], -item["meta"].get("priority", 0))
+    def compare_items(left: dict, right: dict) -> int:
+        left_dist = left["distance"]
+        right_dist = right["distance"]
+        if abs(left_dist - right_dist) < PRIORITY_EPSILON:
+            left_priority = left["meta"].get("priority", 0)
+            right_priority = right["meta"].get("priority", 0)
+            if left_priority != right_priority:
+                return -1 if left_priority > right_priority else 1
+        if left_dist == right_dist:
+            return 0
+        return -1 if left_dist < right_dist else 1
+
+    def best_item(items_list: list[dict]) -> dict:
+        best = items_list[0]
+        for item in items_list[1:]:
+            if compare_items(item, best) < 0:
+                best = item
+        return best
 
     best_per_group = []
     for group_items in grouped.values():
         if len(group_items) < MIN_GROUP_SIZE:
             continue
-        best_per_group.append(min(group_items, key=sort_key))
+        best_per_group.append(best_item(group_items))
     if not best_per_group:
-        best_per_group = [min(group_items, key=sort_key) for group_items in grouped.values()]
-    best_per_group.sort(key=sort_key)
+        best_per_group = [best_item(group_items) for group_items in grouped.values()]
+    best_per_group.sort(key=cmp_to_key(compare_items))
 
     selected: list[dict] = []
     seen_ids = set()
@@ -68,13 +91,13 @@ def select_by_groups(items: list[dict], top_k: int) -> list[dict]:
         dists = [item["distance"] for item in best_per_group]
         best_score = dists[0]
         median_score = statistics.median(dists)
-        allowed = [
-            item for item in best_per_group if item["distance"] <= best_score * 1.03
-        ]
+        cutoff = best_score * 1.10
+        allowed = [item for item in best_per_group if item["distance"] <= cutoff]
+        filtered_items = [item for item in items if item["distance"] <= cutoff]
         print(
             "[debug] groups="
             f"{len(best_per_group)} best={best_score:.4f} median={median_score:.4f} "
-            f"ratio=1.03 allowed={len(allowed)}"
+            f"ratio=1.10 allowed={len(allowed)}"
         )
         if allowed:
             print("[debug] allowed groups:")
@@ -87,6 +110,7 @@ def select_by_groups(items: list[dict], top_k: int) -> list[dict]:
                 )
     else:
         allowed = []
+        filtered_items = items
 
     for item in allowed:
         if item["id"] in seen_ids:
@@ -104,8 +128,8 @@ def select_by_groups(items: list[dict], top_k: int) -> list[dict]:
         if len(selected) >= top_k:
             return selected
 
-    remaining = [item for item in items if item["id"] not in seen_ids]
-    remaining.sort(key=sort_key)
+    remaining = [item for item in filtered_items if item["id"] not in seen_ids]
+    remaining.sort(key=cmp_to_key(compare_items))
     topic_counts: dict[tuple[str, str], int] = {}
     for item in selected:
         meta = item["meta"]
@@ -125,6 +149,51 @@ def select_by_groups(items: list[dict], top_k: int) -> list[dict]:
     return selected
 
 
+def structural_topics(query: str) -> list[str]:
+    """
+    Minimal structural detection (not intent keyword lists).
+    If query expresses branching, ensure 'conditions' is included.
+    """
+    q = query.lower()
+    has_if = "if " in q
+    has_else = " else " in q or " otherwise" in q
+    has_then = " then " in q
+    has_unless = " unless " in q
+    has_when_then = (" when " in q) and (" then " in q)
+
+    if (has_if and (has_then or has_else)) or has_unless or has_when_then:
+        return ["conditions"]
+    return []
+
+
+def pick_forced_first(items: list[dict], forced_topics: list[str], top_k: int) -> list[dict]:
+    """
+    Guarantee at least one item from forced_topics (if available),
+    but keep overall ranking natural (don’t always put forced first).
+    """
+    if not forced_topics:
+        return select_by_groups(items, top_k)
+
+    forced_set = set(forced_topics)
+
+    # Get best forced item (if any)
+    forced_items = [it for it in items if (it.get("meta") or {}).get("topic") in forced_set]
+    if not forced_items:
+        return select_by_groups(items, top_k)
+
+    best_forced = select_by_groups(forced_items, 1)[0]
+
+    # Now rank remaining normally
+    remaining = [it for it in items if it["id"] != best_forced["id"]]
+    rest = select_by_groups(remaining, max(top_k - 1, 0))
+
+    # Merge and then re-sort by your standard compare logic to preserve global ordering
+    combined = [best_forced] + rest
+    # Re-run select_by_groups on combined to let compare_items decide final order cleanly
+    return select_by_groups(combined, top_k)
+
+
+
 def run_query(
     collection_name: str,
     model: str,
@@ -138,16 +207,90 @@ def run_query(
 
     with httpx.Client() as http_client:
         query_embedding = embed_texts(http_client, api_key, [query], model)[0]
+
+    # --- Router stage ---
+    router_results = collection.query(
+        query_embeddings=[query_embedding],
+        n_results=TOP_ROUTER,
+        include=["documents", "metadatas", "distances"],
+        where={"role": {"$eq": "router"}},
+    )
+    router_items = build_items(router_results)
+    router_items.sort(key=lambda item: item["distance"])
+
+    chosen_topics: list[str] = []
+    if router_items:
+        best_router_dist = router_items[0]["distance"]
+        router_cutoff = best_router_dist * ROUTER_CUTOFF_RATIO
+
+        accepted_router = [it for it in router_items if it["distance"] <= router_cutoff]
+
+        print(
+            "[debug] router "
+            f"best={best_router_dist:.4f} cutoff_ratio={ROUTER_CUTOFF_RATIO:.2f} "
+            f"cutoff={router_cutoff:.4f} accepted={len(accepted_router)}/{len(router_items)}"
+        )
+        if accepted_router:
+            print("[debug] router accepted topics:")
+            for it in accepted_router:
+                print(f"  - topic={it['meta'].get('topic')} dist={it['distance']:.4f}")
+
+        for item in accepted_router:
+            topic = item["meta"].get("topic")
+            if topic and topic not in chosen_topics:
+                chosen_topics.append(topic)
+
+    # Structural topics (e.g., branching) are added, not replacing router.
+    forced_topics = structural_topics(query)
+    for t in forced_topics:
+        if t not in chosen_topics:
+            chosen_topics.append(t)
+
+    # If router produced nothing (or everything got filtered), fall back to forced topics only.
+    if not chosen_topics:
+        chosen_topics = forced_topics[:] if forced_topics else ["planner_policy"]
+
+    # --- Support stage (topic-gated) ---
     candidate_k = min(max(top_k * 10, 80), 200)
-    results = collection.query(
+    support_results = collection.query(
         query_embeddings=[query_embedding],
         n_results=candidate_k,
         include=["documents", "metadatas", "distances"],
+        where={
+            "$and": [
+                {"role": {"$eq": "support"}},
+                {"topic": {"$in": chosen_topics}},
+            ]
+        },
+    )
+    support_items = build_items(support_results)
+
+    selected_support = pick_forced_first(
+        support_items,
+        forced_topics=forced_topics,
+        top_k=max(top_k - 1, 1),
     )
 
-    items = build_items(results)
-    selected = select_by_groups(items, top_k)
+    # Always append planner_policy at the end (if present).
+    planner_results = collection.query(
+        query_embeddings=[query_embedding],
+        n_results=1,
+        include=["documents", "metadatas", "distances"],
+        where={
+            "$and": [
+                {"role": {"$eq": "support"}},
+                {"topic": {"$eq": "planner_policy"}},
+            ]
+        },
+    )
+    planner_items = build_items(planner_results)
 
+    selected: list[dict] = selected_support[:]
+    if planner_items:
+        if not any((it.get("meta") or {}).get("topic") == "planner_policy" for it in selected):
+            selected.append(planner_items[0])
+
+    # Print final selection
     for rank, item in enumerate(selected[:top_k], start=1):
         meta = item["meta"]
         text = meta.get("text", "")
@@ -157,6 +300,7 @@ def run_query(
             "   meta.doc_type="
             f"{meta.get('doc_type')} topic={meta.get('topic')} priority={meta.get('priority')}"
         )
+        print(f"   meta.role={meta.get('role')}")
         if text:
             print(f"   text={text}")
 
@@ -168,7 +312,7 @@ def main() -> None:
     parser.add_argument("--chroma-path", default="data/chroma")
     parser.add_argument("--query", help="Query text to retrieve top-k chunks.")
     parser.add_argument("query_text", nargs="?", help="Query text (positional).")
-    parser.add_argument("--top-k", type=int, default=4)
+    parser.add_argument("--top-k", type=int, default=6)
     args = parser.parse_args()
 
     load_dotenv()

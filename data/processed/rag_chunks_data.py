@@ -3,6 +3,7 @@ PROMPT_ACTION_EVENTS_BUILTIN_FILTERING = {
     "doc_type": "RULE",
     "topic": "actions_builtin_filtering",
     "priority": 90,
+    "role": "router",
     "data":  """
 ROUTER.RULE.actions_builtin_filtering
 Intent: database record CRUD action (create/update/delete/duplicate/restore) on a window/entity record.
@@ -63,15 +64,263 @@ If a query starts with "create" or contains "create a record", it is ALWAYS a CR
 }
 
 
+PROMPT_ACTION_EVENTS_BUILTIN_FILTERING_SUPPORT = {
+
+    "doc_type": "RULE",
+    "topic": "actions_builtin_filtering",
+    "priority": 90,
+    "role": "support",
+    "data":  """
+SUPPORT.RULE.actions_builtin_filtering
+Use when the workflow needs full rules and examples for direct record actions.
+""",
+
+    "text": """CRITICAL: Action Events with Built-in Filtering
+
+Use Direct Action Events (NO additional retrieve/filter needed) for:
+
+EVNT_RCRD_ADD (Create a Record):
+- Keywords: "create a record", "add a record", "create record of [entity]"
+- Pattern: "create [a] record of [entity] where [conditions]"
+- For complex create operations with conditions, use CNDN_BIN + EVNT_RCRD_ADD
+- Examples:
+  - "create a record in enrollment tracking where fee charged is 2500 to fee charged 3000" → CNDN_BIN + EVNT_RCRD_ADD (binary condition evaluates the complex fee logic)
+
+EVNT_RCRD_DUP (Duplicate a Record):
+- Keywords: "duplicate the record", "duplicate record of [entity]"
+- Pattern: "duplicate [the] record of [entity] where [conditions]"
+- Has BUILT-IN filtering - directly duplicates matching record
+- Examples:
+  - "duplicate the record of Enrollment Tracking where Title is Enrollment 1 and status is enrolled" → EVNT_RCRD_DUP ONLY
+  - "duplicate a record when value is greater than 100" → EVNT_RCRD_DUP ONLY (built-in condition handling)
+
+EVNT_RCRD_REST (Restore a Record):
+- Keywords: "restore the record", "restore record of [entity]"
+- Pattern: "restore [the] record of [entity] where [conditions]"
+- Has BUILT-IN filtering - directly restores matching record
+- Examples:
+  - "restore the record of Enrollment Tracking where Title is Enrollment 1 and status is enrolled" → EVNT_RCRD_REST ONLY
+
+EVNT_RCRD_DEL (Delete a Record):
+- Keywords: "delete the record", "delete record of [entity]", "remove the record"
+- Pattern: "delete [the] record of [entity] where [conditions]"
+- Has BUILT-IN filtering - directly deletes matching record
+- Examples:
+  - "delete the record of Enrollment Tracking where Title is Enrollment 1 and status is enrolled" → EVNT_RCRD_DEL ONLY
+  - "delete a record when status is expired" → EVNT_RCRD_DEL ONLY
+
+EVNT_RCRD_UPDT (Update a Record):
+- Keywords: "update the record", "update record of [entity]", "modify the record"
+- Pattern: "update [the] record of [entity]"
+- For update operations with conditions, use CNDN_BIN + EVNT_RCRD_UPDT
+- Examples:
+  - "update a record in enrollment tracking where fee charged is 2500 to fee charged 3000" → CNDN_BIN + EVNT_RCRD_UPDT (binary condition evaluates "where fee charged is 2500")
+
+⚠️ CRITICAL RULE:
+- DO NOT combine these action events with EVNT_RCRD_INFO, EVNT_FLTR, or CNDN_BIN (except for complex create operations)
+- Each action event handles its own record selection and filtering internally
+- Use ONLY the action event when the query is a direct action on records
+- CREATE operations with complex conditions may need CNDN_BIN, CNDN_SEQ, CNDN_DOM for condition evaluation
+
+CRITICAL ACTION DETECTION RULE:
+If a query starts with "create" or contains "create a record", it is ALWAYS a CREATE operation (EVNT_RCRD_ADD), never an UPDATE operation, regardless of other words like "to" in the query.
+"""
+}
+
+
 PROMPT_COND_OVERVIEW_AND_PATTERNS = {
 
     "doc_type": "RULE",
     "topic": "conditions",
     "priority": 100,
+    "role": "router",
     "data": """ROUTER.RULE.conditions
 Intent: conditional branching / decision logic in workflow.
 Signals: if/else, when/then, otherwise, unless, first check, if not, else check.
 Output: choose CNDN_BIN / CNDN_SEQ / CNDN_DOM (explicit TRUE + FALSE paths).
+""",
+
+    "text": """⚠️⚠️⚠️ CRITICAL: CONDITION TYPE DETECTION ⚠️⚠️⚠️
+
+STEP A: CONDITION PATTERN ANALYSIS
+
+Read the query carefully and look for these EXACT patterns:
+
+PATTERN 1 - CNDN_DOM (Domino/Cascading Condition):
+Keywords: "if not then", "else check if", "if fails", "first check...if not"
+Meaning: CASCADING conditions where each condition depends on the previous one's failure.
+
+Structure in Flow Sequence: #condition containeer may varies according to the user query
+  ##Flow Sequence
+   1. Trigger (TRG_DB)
+   2. Start
+   3. Domino Condition (CNDN_DOM) 
+      ↳ Container 1 (CNDN_LGC_DOM)
+         → IF: Check status is Low → Send Email (EVNT_NOTI_MAIL)
+         → ELSE: Route to Container 2
+      ↳ Container 2 (CNDN_LGC_DOM)
+         → IF: Check status is Medium → Send Alert (EVNT_NOTI_NOTI)
+         → ELSE: Route to END
+   4. End
+
+Examples that MUST use CNDN_DOM:
+- "First check if X then A, if not then check if Y then B" → CNDN_DOM ✓
+- "Check if status is Low then email, if not then check if status is Medium then alert" → CNDN_DOM ✓
+- "Try X, if fails try Y, if fails try Z" → CNDN_DOM ✓
+
+PATTERN 2 - CNDN_SEQ (Sequence/Parallel Condition):
+Keywords: "AND check if", "and check if", "and verify if", "and if"
+Meaning: INDEPENDENT parallel conditions that are ALL evaluated simultaneously.
+
+Structure in Flow Sequence:
+    ##Flow Sequence
+   1. Trigger (TRG_DB)
+   2. Start
+   3. Sequence Condition (CNDN_SEQ)
+      ↳ Logic Block 1 (CNDN_LGC): Check if status is approved → Send Email (EVNT_NOTI_MAIL)
+      ↳ Logic Block 2 (CNDN_LGC): Check if amount > 1000 → Send Alert (EVNT_NOTI_NOTI)
+   4. End
+
+Examples that MUST use CNDN_SEQ:
+- "Check if A then X, AND check if B then Y" → CNDN_SEQ ✓
+- "Check if status is approved then send email, and check if amount > 1000 then send alert" → CNDN_SEQ ✓
+- "Verify status AND verify amount AND verify date" → CNDN_SEQ ✓
+
+PATTERN 3 - CNDN_BIN (Binary Condition):
+Keywords: "if X then Y", "if X then Y else Z", "when X then Y"
+Meaning: Single condition with two possible paths (TRUE/FALSE), no cascading, no parallel.
+
+⚠️ CRITICAL: CNDN_BIN ELSE BRANCH SPECIFICATION
+- Always explicitly specify BOTH branches in your workflow plan
+- Structure must show what happens in BOTH IF TRUE and IF FALSE cases
+
+Structure in Flow Sequence:( ALWAYS SHOW BOTH BRANCHES:)
+   ##Flow Sequence
+   1. Trigger (TRG_DB)
+   2. Start
+   3. Binary Condition (CNDN_BIN)
+      ↳ IF TRUE: Send Email (EVNT_NOTI_MAIL) → END
+      ↳ IF FALSE: Send Notification (EVNT_NOTI_NOTI) → END
+   4. End
+
+  CRITICAL RULES:
+   - ALWAYS show both IF TRUE and IF FALSE paths
+   - If no explicit ELSE action in query, write: "↳ IF FALSE: route to END"
+   - Each branch MUST show the event code in parentheses: (EVNT_XXX)
+   - Always include → END at the end of each branch path
+
+Examples that MUST use CNDN_BIN:
+- "If quantity > 100 send email, else send notification"
+  → CNDN_BIN
+  → IF TRUE: Send Email (EVNT_NOTI_MAIL)
+  → IF FALSE: Send Notification (EVNT_NOTI_NOTI)
+
+- "If status is active update record, else delete record"
+  → CNDN_BIN
+  → IF TRUE: Update Record (EVNT_RCRD_UPDT)
+  → IF FALSE: Delete Record (EVNT_RCRD_DEL)
+
+- "If user exists create record" (no else specified)
+  → CNDN_BIN
+  → IF TRUE: Create Record (EVNT_RCRD_ADD)
+  → IF FALSE: do nothing (route to END)
+
+- "Send email when status = approved" (implicit single-branch)
+  → CNDN_BIN
+  → IF TRUE: Send Email (EVNT_NOTI_MAIL)
+  → IF FALSE: do nothing (route to END)
+
+CRITICAL DISTINCTION TABLE:
+
+| Query Pattern | Condition Type | Reason |
+|--------------|----------------|--------|
+| "if not then check" | CNDN_DOM | Cascading - second check only if first fails |
+| "else check if" | CNDN_DOM | Cascading - each else leads to next check |
+| "first check...if not" | CNDN_DOM | Cascading - sequential with fallback |
+| "AND check if" | CNDN_SEQ | Parallel - all conditions evaluated independently |
+| "and check if" | CNDN_SEQ | Parallel - all conditions evaluated independently |
+| Single "if X then Y" | CNDN_BIN | Simple binary - one condition with implicit ELSE to END |
+| "if X then Y else Z" | CNDN_BIN | Simple binary - one condition with explicit ELSE |
+| Single "when X" | CNDN_BIN | Simple binary - one condition with implicit ELSE to END |
+
+
+⚠️ CONDITION TYPE DECISION PROCESS:
+
+STEP A: Count the conditions in the query
+- How many "if" statements are there?
+- How many "check if" statements are there?
+- Are they connected by "and" or are they cascading with "if not/else"?
+
+STEP B: Apply these rules:
+
+CNDN_BIN (Binary Condition) - Use for SINGLE IF-THEN branching:
+- ONE condition with IF-THEN-ELSE logic (explicit or implicit ELSE)
+- Keywords: "if X then do Y", "if X then create else update", "when X then Y", "send email if X"
+- ALWAYS specify in Flow Sequence:
+  * What happens when TRUE
+  * What happens when FALSE (even if it's "route to END")
+- Examples:
+  - "If value > 100 create a record" 
+    → Flow: IF TRUE: Create, IF FALSE: END
+  - "Send email if status is pending" 
+    → Flow: IF TRUE: Send Email, IF FALSE: END
+  - "If quantity < 50 then update record else delete record" 
+    → Flow: IF TRUE: Update, IF FALSE: Delete
+
+CNDN_SEQ (Sequence Condition) - Use for MULTIPLE INDEPENDENT parallel conditions:
+- 2+ independent conditions, each with its own separate action
+- Keywords: "check if A then X, AND check if B then Y", "verify if A AND verify if B"
+- REQUIRES: "and check if" or "and if" connecting independent conditions
+- Each condition is evaluated independently (parallel, not cascading)
+- Contains CNDN_LGC (Logic Block) for each independent condition
+- Examples:
+  - "Check if status is approved then send email, AND check if amount > 1000 then send alert" 
+    → CNDN_SEQ with 2 CNDN_LGC blocks
+  - "Verify if user exists then log, AND verify if email is valid then proceed" 
+    → CNDN_SEQ with 2 CNDN_LGC blocks
+
+CNDN_DOM (Domino Condition) - Use for CASCADING sequential conditions:
+- Conditions where each ELSE leads to the next condition check
+- Keywords: "first check X, if not then check Y", "try X, if fails try Y"
+- Each condition depends on previous condition's failure
+- Examples:
+  - "First check if user exists, if not then check permissions, if not then check quota" 
+    → CNDN_DOM with 3 containers
+  - "Try premium service, if fails try standard, if fails try basic" 
+    → CNDN_DOM with 3 containers
+
+DO NOT include ANY condition (CNDN_BIN, CNDN_SEQ, CNDN_DOM) for:
+- Simple data extraction with filtering conditions (JMES/Filter handle conditions internally)
+- Direct action events with built-in conditions (duplicate/restore/delete/update handle "where/when" conditions internally)
+- Sequential actions without conditional branching ("do A then do B then do C")
+- Examples:
+  - "Get names where salary > 50000" → EVNT_JMES ONLY (no CNDN_BIN)
+  - "Get records where status = 'active'" → EVNT_FLTR ONLY (no CNDN_BIN)
+  - "duplicate the record where id = 5" → EVNT_RCRD_DUP ONLY (no CNDN_BIN)
+  - "delete a record when status is expired" → EVNT_RCRD_DEL ONLY (no CNDN_BIN)
+  - "Send email" → EVNT_NOTI_MAIL ONLY (no condition)
+  - "Create a record" → EVNT_RCRD_ADD ONLY (no condition)
+
+⚠️ CRITICAL DISTINCTION:
+- "but X be Y" = Field specification (set X to Y) → NO condition needed
+- "if X then Y" = Conditional branching (check X, decide action) → USE appropriate condition
+- "then" connecting sequential actions = Simple sequence → NO condition needed
+- "then" after "if" = Conditional branch → USE appropriate condition
+- "where" in data queries = Filter criteria → NO condition needed (handled by event)
+- "when" in direct actions (delete when, update when) = Built-in filter → NO condition needed
+
+"""
+}
+
+PROMPT_CONDITIONS_SUPPORT = {
+
+    "doc_type": "RULE",
+    "topic": "conditions",
+    "priority": 100,
+    "role": "support",
+    "data": """
+SUPPORT.RULE.conditions
+Use when the workflow needs full condition patterns, branching rules, and examples.
 """,
 
     "text": """⚠️⚠️⚠️ CRITICAL: CONDITION TYPE DETECTION ⚠️⚠️⚠️
@@ -251,12 +500,13 @@ PROMPT_LOOPS_TYPES = {
     "doc_type": "RULE",
     "topic": "loops",
     "priority": 70,
-    "data": """ROUTER.RULE.loops
+    "role": "support",
+    "data": """SUPPORT.RULE.loops
 Intent: repetition / iteration in workflow.
 Signals: repeat, times, for each, for every, loop, iterate, from X to Y, while, until, do while, break, continue.
 Output: choose EVNT_LOOP_FOR / EVNT_LOOP_WHILE / EVNT_LOOP_DOWHILE (+ EVNT_LOOP_BREAK / EVNT_LOOP_CONTINUE if requested).
-""",
-
+"""
+,
     "text": """
 3. Loop Events (EVNT_LOOP_FOR, EVNT_LOOP_WHILE, EVNT_LOOP_DOWHILE):
 
@@ -555,10 +805,63 @@ PROMPT_DATA_OPS_RULES = {
     "doc_type": "RULE",
     "topic": "data_ops_rules",
     "priority": 80,
+    "role": "router",
     "data": """ROUTER.RULE.data_ops_rules
 Intent: compute/transform/derive a value or reshape data.
 Signals: calculate, compute, sum, total, percentage, concat, uppercase/lowercase, split, replace, regex, format date, add days, round, uuid, random.
 Output: use EVNT_DATA_OPR.""",
+
+    "text": """TEP X: Formula / Calculation Detection (EVNT_DATA_OPR)
+Use EVNT_DATA_OPR when the user wants to:
+- Perform any calculation: add, subtract, multiply, divide, power, percentage, etc.
+- Manipulate strings: uppercase, lowercase, concatenate, extract, replace, split, regex
+- Work with dates: format, add/subtract days, get weekday, convert timezone
+- Generate random values, UUIDs, sequences
+- Derive/compute a field value before creating/updating a record
+- Clean/format data (trim, round, type conversion)
+- Complex conditional value assignment that goes beyond simple field mapping
+
+Keywords/phrases that trigger EVNT_DATA_OPR:
+"calculate", "compute", "add ... and ...", "subtract", "multiply", "divide", "total", "sum", "difference",
+"uppercase", "lowercase", "capitalize", "concatenate", "join", "split", "extract", "replace",
+"format date", "add days", "current date", "today + 7", "weekday", "convert timezone",
+"round", "absolute", "generate random", "if ... then ... else" (for value assignment, not branching)
+
+Examples – ALWAYS use EVNT_DATA_OPR:
+- "create a record where full_name is first_name + last_name" → EVNT_DATA_OPR (concat) + EVNT_RCRD_ADD
+- "set expiry_date to today + 30 days" → EVNT_DATA_OPR (add_timedelta) + EVNT_RCRD_ADD/_UPDT
+- "calculate total_amount = quantity * price" → EVNT_DATA_OPR
+- "make email lowercase before saving" → EVNT_DATA_OPR (lower)
+- "extract phone number using regex" → EVNT_DATA_OPR (findall/sub)
+- "generate a random 8-digit OTP" → EVNT_DATA_OPR
+- "set status to 'Overdue' if due_date < today" → EVNT_DATA_OPR + CNDN_BIN if branching needed
+
+DO NOT use CNDN_BIN just for value assignment – use EVNT_DATA_OPR for computed fields.
+Only use CNDN_BIN when the entire action branches (e.g., create vs update, send email or not).
+
+The workflow plan is NOT JSON.
+It should describe:
+- Workflow name & description
+- Trigger details (type code)
+- Events & actions (event codes, purpose)
+- Conditions / logic steps (include ONLY for conditional actions, not data filtering)
+- Flow sequence (ordered steps from trigger to end)
+
+Stick strictly to the user's request. Do not add extra actions, events, or features such as notifications, emails, or any other outputs unless explicitly mentioned in the query. For example, if the user asks to retrieve or filter records, do not add sending notifications.
+
+"""
+}
+
+PROMPT_DATA_OPS_SUPPORT = {
+
+    "doc_type": "RULE",
+    "topic": "data_ops_rules",
+    "priority": 80,
+    "role": "support",
+    "data": """
+SUPPORT.RULE.data_ops_rules
+Use when the workflow needs full data operation guidance, triggers, and examples.
+""",
 
     "text": """TEP X: Formula / Calculation Detection (EVNT_DATA_OPR)
 Use EVNT_DATA_OPR when the user wants to:
@@ -606,6 +909,7 @@ PROMPT_TRIGGERS_CATALOG = {
     "doc_type": "CATALOG",
     "topic": "triggers_catalog",
     "priority": 40,
+    "role": "support",
     "data": """
 Trigger Type Selection (TRG_DB / TRG_API / TRG_FILE / TRG_SCH / TRG_BTN / TRG_WBH / TRG_AUTH / TRG_APRVL / TRG_FLD / TRG_OUT)
 Use this when a query needs the correct workflow trigger. Maps user intent to trigger type: database record changes → TRG_DB, API calls → TRG_API, file upload/import → TRG_FILE, scheduled/time-based → TRG_SCH, button/UI click → TRG_BTN, incoming webhook → TRG_WBH, auth events (login/logout/password reset/change) → TRG_AUTH, approval actions → TRG_APRVL, field entry/update in UI → TRG_FLD, and timeouts/expiry → TRG_OUT.
@@ -640,8 +944,9 @@ PROMPT_PLANNER_POLICY = {
     "doc_type": "RULE",
     "topic": "planner_policy",
     "priority": 80,
+    "role": "support",
     "data": """
-ROUTER.RULE.planner_policy
+SUPPORT.RULE.planner_policy
 Intent: output format + plan writing constraints (Markdown sections, omit unused sections, flow numbering, branch formatting).
 Output: formatting policy only (not event selection).
 """,
@@ -730,9 +1035,10 @@ PROMPT_NOTIFICATIONS_INTENT = {
     "doc_type": "RULE",
     "topic": "notifications_intent",
     "priority": 95,
+    "role": "router",
     "data": """
 ROUTER.RULE.notifications_intent
-Intent: send a message/notification to a recipient.
+Intent: send a message/notification to a recipient.Do not use when query contains if/else branching — use conditions.
 Signals: email, mail, notify, notification, alert, sms, text message, push, webhook.
 Output: select EVNT_NOTI_* event family (exact mapping handled by agent/backstory).
 """,
@@ -740,14 +1046,37 @@ Output: select EVNT_NOTI_* event family (exact mapping handled by agent/backstor
 Do not use for record CRUD, loops, or computations."""
 }
 
+PROMPT_NOTIFICATIONS_SUPPORT = {
+    "doc_type": "RULE",
+    "topic": "notifications_intent",
+    "priority": 95,
+    "role": "support",
+    "data": """
+SUPPORT.RULE.notifications_intent
+Use when the workflow needs notification guidance and event family selection.
+""",
+    "text": """Use when the user request is primarily about sending a notification/message.
+Map intent to the correct EVNT_NOTI_* event:
+- Email → EVNT_NOTI_MAIL
+- SMS/Text → EVNT_NOTI_SMS
+- System notification → EVNT_NOTI_NOTI
+- Push → EVNT_NOTI_PUSH
+- Webhook → EVNT_NOTI_WBH
+
+Do not use for record CRUD, loops, or computations."""
+}
+
 
 
 chunk_data = [
     PROMPT_ACTION_EVENTS_BUILTIN_FILTERING,
+    PROMPT_ACTION_EVENTS_BUILTIN_FILTERING_SUPPORT,
     PROMPT_NOTIFICATIONS_INTENT,
+    PROMPT_NOTIFICATIONS_SUPPORT,
     PROMPT_DATA_OPS_RULES,
+    PROMPT_DATA_OPS_SUPPORT,
     PROMPT_COND_OVERVIEW_AND_PATTERNS,
+    PROMPT_CONDITIONS_SUPPORT,
     PROMPT_LOOPS_TYPES,
     PROMPT_PLANNER_POLICY,
 ]
-

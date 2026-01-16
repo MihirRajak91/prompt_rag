@@ -66,6 +66,7 @@ def build_collection(
                 "doc_type": item.get("doc_type", ""),
                 "topic": item.get("topic", ""),
                 "priority": item.get("priority", 0),
+                "role": item.get("role", ""),
                 "index": index,
                 "source": source_name,
             }
