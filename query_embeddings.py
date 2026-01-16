@@ -18,6 +18,10 @@ DISTANCE_SORT = "asc"
 MIN_GROUP_SIZE = 2
 TOP_ROUTER = 3
 PRIORITY_EPSILON = 0.03
+ROUTER_MAX_ABS_GAP = 0.08    # tune: 0.03–0.10 depending on embedding scale
+ROUTER_MAX_REL_GAP = 0.05    # 3% relative gap
+ROUTER_MIN_GAP_TO_ALLOW_MULTI = 0.05  # if everything is too close, treat as ambiguous and keep 1
+
 
 # NEW: Router topic acceptance window.
 # Keep TOP_ROUTER candidates, but only accept topics whose distance is within this ratio of the best router distance.
@@ -57,16 +61,24 @@ def select_by_groups(items: list[dict], top_k: int) -> list[dict]:
         grouped.setdefault(group_key, []).append(item)
 
     def compare_items(left: dict, right: dict) -> int:
-        left_dist = left["distance"]
-        right_dist = right["distance"]
-        if abs(left_dist - right_dist) < PRIORITY_EPSILON:
-            left_priority = left["meta"].get("priority", 0)
-            right_priority = right["meta"].get("priority", 0)
-            if left_priority != right_priority:
-                return -1 if left_priority > right_priority else 1
-        if left_dist == right_dist:
-            return 0
-        return -1 if left_dist < right_dist else 1
+        ld = left["distance"]
+        rd = right["distance"]
+
+        if ld != rd:
+            return -1 if ld < rd else 1
+
+        # Only break ties by priority inside same group (topic/doc_type)
+        lm = left["meta"]
+        rm = right["meta"]
+        lgroup = (lm.get("doc_type") or "UNKNOWN", lm.get("topic") or "UNKNOWN")
+        rgroup = (rm.get("doc_type") or "UNKNOWN", rm.get("topic") or "UNKNOWN")
+        if lgroup == rgroup:
+            lp = lm.get("priority", 0)
+            rp = rm.get("priority", 0)
+            if lp != rp:
+                return -1 if lp > rp else 1
+
+        return 0
 
     def best_item(items_list: list[dict]) -> dict:
         best = items_list[0]
@@ -220,25 +232,38 @@ def run_query(
 
     chosen_topics: list[str] = []
     if router_items:
-        best_router_dist = router_items[0]["distance"]
-        router_cutoff = best_router_dist * ROUTER_CUTOFF_RATIO
+        best = router_items[0]["distance"]
 
-        accepted_router = [it for it in router_items if it["distance"] <= router_cutoff]
+        # Compute gaps
+        gaps = [it["distance"] - best for it in router_items[1:]]
+        min_gap = min(gaps) if gaps else 999.0
+
+        # If the router is "flat" (all topics very similar), keep only best topic
+        if min_gap < ROUTER_MIN_GAP_TO_ALLOW_MULTI:
+            accepted_router = [router_items[0]]
+        else:
+            accepted_router = []
+            for it in router_items:
+                abs_gap = it["distance"] - best
+                rel_gap = abs_gap / max(best, 1e-9)
+                if abs_gap <= ROUTER_MAX_ABS_GAP and rel_gap <= ROUTER_MAX_REL_GAP:
+                    accepted_router.append(it)
 
         print(
             "[debug] router "
-            f"best={best_router_dist:.4f} cutoff_ratio={ROUTER_CUTOFF_RATIO:.2f} "
-            f"cutoff={router_cutoff:.4f} accepted={len(accepted_router)}/{len(router_items)}"
+            f"best={best:.4f} min_gap={min_gap:.4f} "
+            f"accepted={len(accepted_router)}/{len(router_items)}"
         )
         if accepted_router:
             print("[debug] router accepted topics:")
             for it in accepted_router:
                 print(f"  - topic={it['meta'].get('topic')} dist={it['distance']:.4f}")
 
-        for item in accepted_router:
-            topic = item["meta"].get("topic")
+        for it in accepted_router:
+            topic = it["meta"].get("topic")
             if topic and topic not in chosen_topics:
                 chosen_topics.append(topic)
+
 
     # Structural topics (e.g., branching) are added, not replacing router.
     forced_topics = structural_topics(query)

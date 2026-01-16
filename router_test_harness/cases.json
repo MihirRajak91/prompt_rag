@@ -1,0 +1,75 @@
+[
+  {
+    "name": "BIN + notification: approved -> email else notification",
+    "query": "if status is approved send email else send notification",
+    "expect_router_topics": [
+      "notifications_intent"
+    ],
+    "expect_support_topics": [
+      "conditions",
+      "notifications_intent"
+    ],
+    "forbid_support_topics": [
+      "actions_builtin_filtering",
+      "filtering"
+    ],
+    "max_router_topics": 2,
+    "max_support_topics": 5,
+    "show_raw_on_fail": true
+  },
+  {
+    "name": "Implicit BIN: when approved -> email (else END)",
+    "query": "send email when status is approved",
+    "expect_support_topics": [
+      "conditions",
+      "notifications_intent"
+    ],
+    "forbid_support_topics": [
+      "filtering",
+      "actions_builtin_filtering"
+    ],
+    "max_support_topics": 6
+  },
+  {
+    "name": "SEQ: two independent checks",
+    "query": "check if status is approved send email and check if amount > 1000 send notification",
+    "expect_support_topics": [
+      "conditions"
+    ],
+    "forbid_support_topics": [
+      "actions_builtin_filtering"
+    ],
+    "max_support_topics": 8
+  },
+  {
+    "name": "DOM: cascading checks",
+    "query": "first check if status is low send email else check if status is medium send notification",
+    "expect_support_topics": [
+      "conditions"
+    ],
+    "max_support_topics": 8
+  },
+  {
+    "name": "Filter records: no conditions topic",
+    "query": "get records where status is approved",
+    "expect_support_topics": [
+      "filtering"
+    ],
+    "forbid_support_topics": [
+      "conditions"
+    ],
+    "max_support_topics": 6
+  },
+  {
+    "name": "Action builtin filtering: delete record where status expired",
+    "query": "delete the record where status is expired",
+    "expect_support_topics": [
+      "actions_builtin_filtering"
+    ],
+    "forbid_support_topics": [
+      "conditions",
+      "filtering"
+    ],
+    "max_support_topics": 6
+  }
+]
